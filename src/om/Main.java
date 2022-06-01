@@ -14,13 +14,18 @@ import java.util.List;
 import java.util.Random;
 import java.util.Scanner;
 
+import org.apache.jena.ontology.*;
+import org.apache.jena.query.*;
 import org.apache.jena.rdf.model.*;
 import org.apache.jena.vocabulary.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class Main {
 
 	private static String delimiter = "||";
 	private static boolean exit = false;
+	private static OntModel memModel;
 	
 	public static void main(String[] args) {
 	    ArrayList<Closeable> toClose = new ArrayList<>();
@@ -74,7 +79,9 @@ public class Main {
 		
 	}
 
-	private static String processComand(String command) {
+	private static String processComand(String json) {
+		JSONObject object = new JSONObject(json);
+		String command = object.getString("command");
 		System.out.println(command);
 		if (command.equals("e"))
 			return "";
@@ -89,27 +96,19 @@ public class Main {
 			return "";
 		}
 		if (command.startsWith("generate")) {
-			int n = 0;
-			String[] coms = command.split(" ");
-			try {
-				if (coms.length > 1)
-					n = Integer.parseInt(coms[1]);
-			} catch (NumberFormatException e) {}
+			int n = object.getInt("size");
 			if (n > 0)
 				generate(n);
 			return String.format("%d axioms has been generated.", n);
 		} else if (command.startsWith("read")) {
-			String name = "../ontology.txt";
-			String[] coms = command.split(" ");
-			if (coms.length > 1)
-				name = coms[1];
-			Model model = ModelFactory.createDefaultModel();
+			String name = object.has("path") ? object.getString("path") : "../ontology.txt";
+			memModel = ModelFactory.createOntologyModel();
 			try {
-				model.read(new FileInputStream(name), null);
+				memModel.read(new FileInputStream(name), null);
 			} catch (FileNotFoundException e) {
 				e.printStackTrace();
 			}
-			model.write(System.out);
+			memModel.write(System.out);
 			return "test";
 		} else if (command.startsWith("subscribe")) {
 			String triple = command.substring("subscribe".length()+1);
@@ -124,17 +123,25 @@ public class Main {
 			
 			return "you has been unsubscribed";
 		} else if (command.startsWith("insert")) {
-			String triple = command.substring("insert".length()+1);
-			String[] tri = triple.split(delimiter);
+			JSONArray triples = object.getJSONArray("triples");
+			for (int i = 0; i < triples.length(); i++) {
+				JSONObject triple = triples.getJSONObject(i);
+				System.out.println(String.format("s: %s\np: %s\no: %s\n", triple.get("subject"), triple.get("predicate"), triple.get("object")));
+			}
 			// TODO: insert triple
 			
 			return "triples has been added";
 		} else if (command.startsWith("query")) {
 			String res = "";
-			String query = command.substring("query".length()+1);
+			String queryString = object.getString("query");
 			// TODO: execute query
-			
-			return "query result:\n" + res;
+			Query query = QueryFactory.create(queryString);
+			try (QueryExecution qexec = QueryExecutionFactory.create(query, memModel)) {
+				ResultSet results = qexec.execSelect();
+			    ResultSetFormatter.out(System.out, results, query);
+			}
+			return "";
+			//return "query result:\n" + res;
 		} else
 			return "Wrong command: " + command;
 			//System.out.println(command.toUpperCase());
@@ -142,17 +149,23 @@ public class Main {
 	}
 	
 	private static void generate(int n) {
-		Model model = ModelFactory.createDefaultModel();
+		OntModel model = ModelFactory.createOntologyModel(OntModelSpec.OWL_MEM_MICRO_RULE_INF);
 		Random r = new Random();
-		List<Resource> resources = new ArrayList<>();
+		List<OntClass> classes = new ArrayList<>();
 		int stmts = 0;
 		while (stmts < n) {
-			Resource res = model.createResource();
-			int props = r.nextInt(3) + 1;
-			for (int i = 0; i < props; i++)
-				res.addProperty(VCARD.LABEL, "prop" + (stmts + i));
-			stmts += props;
-			int rels = r.nextInt(5) + 1;
+			String className = "http://example/"+"class" + stmts;
+			OntClass res = model.createClass(className);
+			int individs = r.nextInt(3) + 1;
+			for (int i = 0; i < individs; i++)
+				res.createIndividual(className+"/ind" + i);
+			stmts += individs;
+			if (classes.size() > 0) {
+				int ind = r.nextInt(classes.size());
+				classes.get(ind).addSubClass(res);
+			}
+			stmts++;
+			/*int rels = r.nextInt(5) + 1;
 			List<Integer> indexes = new ArrayList<>();
 			for (int i = 0; i < rels && resources.size() > indexes.size(); i++) {
 				int ind = r.nextInt(resources.size());
@@ -162,8 +175,8 @@ public class Main {
 				indexes.add(ind);
 				res.addProperty(VCARD.N, resources.get(ind));
 			}
-			stmts += rels;
-			resources.add(res);
+			stmts += rels;*/
+			classes.add(res);
 		}
 		try {
 			model.write(new FileOutputStream("../ontology.txt"));
