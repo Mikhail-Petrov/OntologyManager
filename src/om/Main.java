@@ -11,16 +11,32 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+
 import org.apache.jena.ontology.*;
 import org.apache.jena.query.*;
 import org.apache.jena.rdf.model.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import org.eclipse.rdf4j.model.Model;
+import org.eclipse.rdf4j.query.BindingSet;
+import org.eclipse.rdf4j.query.TupleQuery;
+import org.eclipse.rdf4j.query.TupleQueryResult;
+import org.eclipse.rdf4j.repository.Repository;
+import org.eclipse.rdf4j.repository.RepositoryConnection;
+import org.eclipse.rdf4j.repository.sail.SailRepository;
+import org.eclipse.rdf4j.rio.RDFFormat;
+import org.eclipse.rdf4j.rio.RDFParseException;
+import org.eclipse.rdf4j.rio.Rio;
+import org.eclipse.rdf4j.rio.UnsupportedRDFormatException;
+import org.eclipse.rdf4j.sail.memory.MemoryStore;
+
 public class Main {
 
 	private static boolean exit = false;
 	private static OntModel memModel;
+	private static Model memModel2;
+	private static Repository db = new SailRepository(new MemoryStore());
 	private static final String subClass = "rdfs:subClassOf", isDefinedBy = "rdfs:isDefinedBy", seeAlso = "rdfs:seeAlso", disjointWith = "owl:disjointWith";
 	
 	private static List<String> subscribes = new ArrayList<>();
@@ -44,7 +60,9 @@ public class Main {
 					while (!exit) {
 						String res;
 						try {
-							res = processComand(in.readUTF(), out);
+							try (RepositoryConnection conn = db.getConnection()) {
+								res = processComand(in.readUTF(), out, conn);
+							}
 							if (res.isEmpty()) {
 								Sock.close();
 								in.close();
@@ -56,6 +74,11 @@ public class Main {
 							out.writeUTF(res);
 						} catch (IOException e) {
 							e.printStackTrace();
+						}
+						finally {
+						  // before our program exits, make sure the database is properly shut down.
+							if (db != null)
+								db.shutDown();
 						}
 					}
 				};
@@ -80,7 +103,7 @@ public class Main {
 		
 	}
 
-	private static String processComand(String json, DataOutputStream out) {
+	private static String processComand(String json, DataOutputStream out, RepositoryConnection conn) {
 		JSONObject object = new JSONObject(json);
 		String command = object.getString("command");
 		System.out.println(command);
@@ -102,6 +125,8 @@ public class Main {
 				generate(n);
 			return String.format("%d axioms has been generated.", n);
 		case "write":
+			if (memModel == null)
+				return "model is empty";
 			try {
 				memModel.write(new FileOutputStream("../ontology.xml"));
 			} catch (FileNotFoundException e1) {
@@ -112,7 +137,9 @@ public class Main {
 			memModel = ModelFactory.createOntologyModel();
 			try {
 				memModel.read(new FileInputStream(name), null);
-			} catch (FileNotFoundException e) {
+				memModel2 = Rio.parse(new FileInputStream(name), RDFFormat.RDFXML);
+				conn.add(memModel2);
+			} catch (IOException | RDFParseException | UnsupportedRDFormatException e) {
 				e.printStackTrace();
 			}
 			//memModel.write(System.out);
@@ -226,9 +253,11 @@ public class Main {
 			} else
 				return "failed to remove individual " + remIndName + " from class " + remIndClassName;
 		case "query":
+			if (memModel == null)
+				return "model is empty";
 			String res = "";
-			// execute query
 			String queryString = object.getString("query");
+			// execute query
 			Query query = QueryFactory.create(queryString);
 			long startTime = System.currentTimeMillis(), finishTime = 0;
 			try (QueryExecution qexec = QueryExecutionFactory.create(query, memModel)) {
@@ -252,7 +281,25 @@ public class Main {
 			}
 			try (QueryExecution qexec = QueryExecutionFactory.create(query, memModel)) {
 				ResultSet results = qexec.execSelect();
-			    ResultSetFormatter.out(System.out, results, query);
+			   // ResultSetFormatter.out(System.out, results, query);
+			}
+			
+			TupleQuery query2 = conn.prepareTupleQuery(queryString);
+			startTime = System.currentTimeMillis(); finishTime = 0;
+			try (TupleQueryResult result = query2.evaluate()) {
+				List<String> bindingNames = result.getBindingNames();
+				finishTime = System.currentTimeMillis();
+				if (!bindingNames.isEmpty()) {
+					int resAmount = 0;
+					for (BindingSet solution : result) {
+						System.out.println(String.format("?%s = %s", bindingNames.get(0), solution.getValue(bindingNames.get(0))));
+						resAmount++;
+					}
+					finishTime = System.currentTimeMillis();
+					if (finishTime > 0)
+						System.out.println(String.format("%d\t%d", resAmount, finishTime - startTime));
+				} else
+					System.out.println("no results");
 			}
 			return res;
 			//return "query result:\n" + res;

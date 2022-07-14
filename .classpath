@@ -48,5 +48,7 @@
 	<classpathentry kind="lib" path="D:/Projects/apache-jena-4.5.0/lib/slf4j-api-1.7.36.jar"/>
 	<classpathentry kind="lib" path="D:/Projects/apache-jena-4.5.0/lib/titanium-json-ld-1.2.0.jar"/>
 	<classpathentry kind="lib" path="D:/Projects/json-20220320.jar"/>
+	<classpathentry kind="lib" path="D:/Projects/eclipse-rdf4j-4.1.0-M1-onejar.jar"/>
+	<classpathentry kind="lib" path="D:/Projects/CacheBuilder/guava-31.1-jre.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
